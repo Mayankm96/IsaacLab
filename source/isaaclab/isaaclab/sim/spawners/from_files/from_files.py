@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import TYPE_CHECKING
 
 import omni.kit.commands
@@ -24,7 +25,7 @@ from isaaclab.sim.utils import (
     select_usd_variants,
     set_prim_visibility,
 )
-from isaaclab.utils.assets import check_usd_path_with_timeout
+from isaaclab.utils.assets import cache_asset_with_dependencies, check_usd_path_with_timeout
 
 if TYPE_CHECKING:
     from . import from_files_cfg
@@ -306,15 +307,24 @@ def _spawn_from_usd_file(
     Raises:
         FileNotFoundError: If the USD file does not exist at the given path.
     """
-    # check if usd path exists with periodic logging until timeout
-    if not check_usd_path_with_timeout(usd_path):
-        if "4.5" in usd_path:
-            usd_5_0_path = usd_path.replace("http", "https").replace("/4.5", "/5.0")
-            if not check_usd_path_with_timeout(usd_5_0_path):
-                raise FileNotFoundError(f"USD file not found at path at either: '{usd_path}' or '{usd_5_0_path}'.")
-            usd_path = usd_5_0_path
-        else:
-            raise FileNotFoundError(f"USD file not found at path at: '{usd_path}'.")
+    # Store original path for logging
+    original_usd_path = usd_path
+
+    # Try to get cached version of remote asset first (includes dependencies)
+    cached_path = cache_asset_with_dependencies(usd_path, force_download=False)
+    if cached_path is not None:
+        logger.info(f"Using cached asset: {os.path.basename(cached_path)} (from {original_usd_path})")
+        usd_path = cached_path
+    else:
+        # check if usd path exists with periodic logging until timeout
+        if not check_usd_path_with_timeout(usd_path):
+            if "4.5" in usd_path:
+                usd_5_0_path = usd_path.replace("http", "https").replace("/4.5", "/5.0")
+                if not check_usd_path_with_timeout(usd_5_0_path):
+                    raise FileNotFoundError(f"USD file not found at path at either: '{usd_path}' or '{usd_5_0_path}'.")
+                usd_path = usd_5_0_path
+            else:
+                raise FileNotFoundError(f"USD file not found at path at: '{usd_path}'.")
 
     # Obtain current stage
     stage = get_current_stage()

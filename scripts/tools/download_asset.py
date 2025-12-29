@@ -17,6 +17,7 @@ This script downloads assets from Omniverse Nucleus server, supporting:
 
 - Single files and recursive directory downloads
 - Path placeholders for common asset locations
+- Optional caching to avoid re-downloading assets
 
 Usage:
 
@@ -31,11 +32,20 @@ Usage:
         --path "{ISAAC_NUCLEUS_DIR}/Props/YCB/Axis_Aligned" \
         --recursive --output ./assets/ycb
 
+    # Download and cache asset (use cache on subsequent runs)
+    ./isaaclab.sh -p scripts/tools/download_asset.py \
+        --path "{ISAAC_NUCLEUS_DIR}/Robots/UniversalRobots/ur10e/ur10e.usd" \
+        --cache
+
 Placeholders:
     {ISAACLAB_NUCLEUS_DIR} - Isaac Lab assets
     {ISAAC_NUCLEUS_DIR}    - Isaac Sim assets
     {NVIDIA_NUCLEUS_DIR}   - NVIDIA assets
     {NUCLEUS_ASSET_ROOT_DIR} - Root directory
+
+Environment Variables:
+    ISAACLAB_CACHE_ASSETS: Enable/disable automatic caching (default: true)
+    ISAACLAB_ASSET_CACHE_DIR: Cache directory (default: ~/.isaaclab/asset_cache)
 """
 
 import argparse
@@ -50,6 +60,12 @@ parser.add_argument("--force", action="store_true", default=True, help="Overwrit
 parser.add_argument("--no-force", dest="force", action="store_false", help="Skip existing files")
 parser.add_argument("--recursive", action="store_true", help="Download directories recursively")
 parser.add_argument("--check-only", action="store_true", help="Check if asset exists without downloading")
+parser.add_argument(
+    "--cache", action="store_true", help="Use asset cache (downloads to cache directory, reuses on subsequent runs)"
+)
+parser.add_argument(
+    "--cache-deps", action="store_true", help="When using --cache, also cache USD dependencies (experimental)"
+)
 parser.add_argument(
     "--log-level",
     type=str,
@@ -70,7 +86,7 @@ import logging
 import os
 import sys
 import tempfile
-from typing import Literal, Tuple
+from typing import Literal
 
 import omni.client
 
@@ -279,6 +295,27 @@ def main() -> bool:
         if placeholder in nucleus_path:
             nucleus_path = nucleus_path.replace(placeholder, value)
             logging.debug(f"Resolved {placeholder} -> {value}")
+
+    # Handle cache mode
+    if args_cli.cache:
+        logging.info("Using asset cache mode")
+
+        # Use the caching system
+        if args_cli.cache_deps:
+            cached_path = assets_utils.cache_asset_with_dependencies(nucleus_path, force_download=args_cli.force)
+        else:
+            cached_path = assets_utils.get_cached_asset_path(nucleus_path, force_download=args_cli.force)
+
+        if cached_path:
+            logging.info(f"Asset cached at: {cached_path}")
+
+            # Show cache statistics
+            stats = assets_utils.get_cache_statistics()
+            logging.info(f"Cache contains {stats['num_assets']} asset(s), total size: {stats['total_size_mb']:.2f} MB")
+            return True
+        else:
+            logging.error("Failed to cache asset")
+            return False
 
     # Resolve output directory
     if args_cli.output:
